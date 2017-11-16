@@ -1,8 +1,12 @@
 package com.iot.practice.michael.practice02;
 
+import java.io.IOException;
+import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Set;
+import java.util.UUID;
 
+import android.bluetooth.BluetoothSocket;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.IntentFilter;
@@ -11,6 +15,7 @@ import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
 import android.content.Intent;
 import android.support.v7.app.AppCompatActivity;
+import android.support.v7.view.menu.ListMenuPresenter;
 import android.util.Log;
 import android.view.View;
 import android.widget.AdapterView;
@@ -44,6 +49,7 @@ public class MainActivity extends AppCompatActivity {
     btnDisconnect.setOnClickListener(OnClickBtnDisconnect);
 
     listView = findViewById(R.id.listview);
+    listView.setOnItemClickListener(OnClickListView);
 
     bluetoothAdapter = BluetoothAdapter.getDefaultAdapter();
     bluetoothAdapter.startDiscovery();
@@ -58,23 +64,48 @@ public class MainActivity extends AppCompatActivity {
     public void onReceive(Context context, Intent intent) {
       String action = intent.getAction();
       if (BluetoothDevice.ACTION_FOUND.equals(action)) {
-        BluetoothDevice bluetoothDevice = intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE);
-        arrayListDeviceName.add(bluetoothDevice.getName() + "\n" + bluetoothDevice.getAddress());
-        arrayListBluetoothDevice.add(bluetoothDevice);
-        listView.setAdapter(new ArrayAdapter<String>(context, android.R.layout.simple_list_item_1, arrayListDeviceName));
+        BluetoothDevice device = intent
+                .getParcelableExtra(BluetoothDevice.EXTRA_DEVICE);
+        arrayListDeviceName.add(device.getName() + "\n" + device.getAddress());
+        arrayListBluetoothDevice.add(device);
+        Log.i(TAG, device.getName() + "\n" + device.getAddress());
+        listView.setAdapter(new ArrayAdapter<String>(context,
+                android.R.layout.simple_list_item_1, arrayListDeviceName));
       }
     }
   };
 
+  @Override
+  protected void onDestroy() {
+    unregisterReceiver(broadcastReceiver);
+    super.onDestroy();
+  }
+
+  ListView.OnItemClickListener OnClickListView = new ListView.OnItemClickListener() {
+    @Override
+    public void onItemClick(AdapterView<?> adapterView, View view, int i, long l) {
+      BluetoothDevice deviceClicked = arrayListBluetoothDevice.get(i);
+      pairDevice(deviceClicked);
+    }
+  };
+
+  private void pairDevice(BluetoothDevice device) {
+    try {
+      Method method = device.getClass().getMethod("createBond", (Class[]) null);
+      method.invoke(device, (Object[]) null);
+    } catch (Exception e) {
+      e.printStackTrace();
+    }
+  }
+
   Button.OnClickListener OnClickBtnDeviceSelect = new Button.OnClickListener() {
     @Override
     public void onClick(View view) {
-      if (bluetoothAdapter == null){
+      if (bluetoothAdapter == null) {
         Log.d(TAG, "Device does not support Bluetooth");
         Toast.makeText(getApplicationContext(),
                 "Device does not support Bluetooth", Toast.LENGTH_LONG).show();
-      }
-      else {
+      } else {
         if (!bluetoothAdapter.isEnabled()) {
           Intent intentTurnOnBLE = new Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE);
           startActivityForResult(intentTurnOnBLE, 0);
