@@ -52,10 +52,16 @@ public class MainActivity extends AppCompatActivity {
     listView.setOnItemClickListener(OnClickListView);
 
     bluetoothAdapter = BluetoothAdapter.getDefaultAdapter();
-    bluetoothAdapter.startDiscovery();
 
-    IntentFilter filter = new IntentFilter(BluetoothDevice.ACTION_FOUND);
-    registerReceiver(broadcastReceiver, filter);
+    if (bluetoothAdapter == null) {
+      Log.d(TAG, "Device does not support Bluetooth");
+      Toast.makeText(getApplicationContext(),
+              "Device does not support Bluetooth", Toast.LENGTH_LONG).show();
+    } else {
+      bluetoothAdapter.startDiscovery();
+      IntentFilter filter = new IntentFilter(BluetoothDevice.ACTION_FOUND);
+      registerReceiver(broadcastReceiver, filter);
+    }
 
   }
 
@@ -64,6 +70,7 @@ public class MainActivity extends AppCompatActivity {
     public void onReceive(Context context, Intent intent) {
       String action = intent.getAction();
       if (BluetoothDevice.ACTION_FOUND.equals(action)) {
+        Toast.makeText(getApplicationContext(), "Broadcast success", Toast.LENGTH_LONG).show();
         BluetoothDevice device = intent
                 .getParcelableExtra(BluetoothDevice.EXTRA_DEVICE);
         arrayListDeviceName.add(device.getName() + "\n" + device.getAddress());
@@ -101,19 +108,12 @@ public class MainActivity extends AppCompatActivity {
   Button.OnClickListener OnClickBtnDeviceSelect = new Button.OnClickListener() {
     @Override
     public void onClick(View view) {
-      if (bluetoothAdapter == null) {
-        Log.d(TAG, "Device does not support Bluetooth");
-        Toast.makeText(getApplicationContext(),
-                "Device does not support Bluetooth", Toast.LENGTH_LONG).show();
-      } else {
-        if (!bluetoothAdapter.isEnabled()) {
-          Intent intentTurnOnBLE = new Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE);
-          startActivityForResult(intentTurnOnBLE, 0);
-          Toast.makeText(getApplicationContext(), "Bluetooth has turned on", Toast.LENGTH_LONG).show();
+      if (!bluetoothAdapter.isEnabled()) {
+        Intent intentTurnOnBLE = new Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE);
+        startActivityForResult(intentTurnOnBLE, 0);
 
-        } else {
-          // Already on
-        }
+      } else {
+        // Already on
       }
     }
   };
