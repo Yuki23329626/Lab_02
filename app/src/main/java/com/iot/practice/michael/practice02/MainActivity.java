@@ -1,9 +1,14 @@
 package com.iot.practice.michael.practice02;
 
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
+import java.util.UUID;
 
 import android.Manifest;
+import android.bluetooth.BluetoothSocket;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.IntentFilter;
@@ -11,6 +16,8 @@ import android.os.Bundle;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
 import android.content.Intent;
+import android.os.Handler;
+import android.os.Message;
 import android.support.v4.app.ActivityCompat;
 import android.support.v7.app.AppCompatActivity;
 import android.util.Log;
@@ -77,26 +84,6 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    private Button.OnClickListener onClickBtnGetData = new Button.OnClickListener() {
-        @Override
-        public void onClick(View v) {
-            if(!hasAvailableDevice()){
-                tvStatus.setText("You don't have available paired device");
-            } else {
-                tvStatus.setText("Getting data");
-            }
-        }
-    };
-
-    private boolean hasAvailableDevice() {
-        String targetAddress = "2C:F7:F1";
-        for(BluetoothDevice currentDevice : arrayListBluetoothDevice) {
-            if (currentDevice.getAddress().startsWith(targetAddress) && currentDevice.getBondState() == BluetoothDevice.BOND_BONDED)
-                return true;
-        }
-        return false;
-    }
-
     private BroadcastReceiver broadcastReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
@@ -157,6 +144,7 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onDestroy() {
         unregisterReceiver(broadcastReceiver);
+
         super.onDestroy();
     }
 
@@ -227,4 +215,106 @@ public class MainActivity extends AppCompatActivity {
         }
     };
 
+    private BluetoothDevice getAvailableDevice() {
+        String targetAddress = "2C:F7:F1";
+        for(BluetoothDevice currentDevice : arrayListBluetoothDevice) {
+            if (currentDevice.getAddress().startsWith(targetAddress) && currentDevice.getBondState() == BluetoothDevice.BOND_BONDED)
+                return currentDevice;
+        }
+        return null;
+    }
+
+    boolean isConnecting = false;
+    private Button.OnClickListener onClickBtnGetData = new Button.OnClickListener() {
+        @Override
+        public void onClick(View v) {
+            if(getAvailableDevice() == null){
+                tvStatus.setText("You don't have available paired device");
+            } else {
+                if (!isConnecting) {
+                    tvStatus.setText("Getting data");
+                    Thread threadConnect = new ConnectThread(getAvailableDevice());
+                    threadConnect.start();
+                }
+            }
+        }
+    };
+
+    private class ConnectThread extends Thread {
+        private final BluetoothSocket mmSocket;
+        private final BluetoothDevice mmDevice;
+
+        public ConnectThread(BluetoothDevice device) {
+            // Use a temporary object that is later assigned to mmSocket
+            // because mmSocket is final.
+            BluetoothSocket tmp = null;
+            mmDevice = device;
+
+            try {
+                // Get a BluetoothSocket to connect with the given BluetoothDevice.
+                // MY_UUID is the app's UUID string, also used in the server code.
+                tmp = device.createRfcommSocketToServiceRecord(UUID.randomUUID());
+            } catch (IOException e) {
+                Log.e(TAG, "Socket's create() method failed", e);
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        tvStatus.setText("Socket's create() method failed");
+                    }
+                });
+            }
+            mmSocket = tmp;
+        }
+
+        public void run() {
+            // Cancel discovery because it otherwise slows down the connection.
+            bluetoothAdapter.cancelDiscovery();
+
+            try {
+                // Connect to the remote device through the socket. This call blocks
+                // until it succeeds or throws an exception.
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        tvStatus.setText("Connecting");
+                    }
+                });
+                mmSocket.connect();
+            } catch (final IOException connectException) {
+                // Unable to connect; close the socket and return.
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        tvStatus.setText("Unable to connect: " + connectException.toString());
+                    }
+                });
+                try {
+                    mmSocket.close();
+                } catch (IOException closeException) {
+                    Log.e(TAG, "Could not close the client socket", closeException);
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            tvStatus.setText("Could not close the client socket");
+                        }
+                    });
+                }
+                return;
+            }
+
+            // The connection attempt succeeded. Perform work associated with
+            // the connection in a separate thread.
+            // Toast.makeText(getApplicationContext(), "The connection attempt succeeded", Toast.LENGTH_LONG).show();
+        }
+
+        // Closes the client socket and causes the thread to finish.
+        public void cancel() {
+            try {
+                mmSocket.close();
+            } catch (IOException e) {
+                Log.e(TAG, "Could not close the client socket", e);
+                tvStatus.setText("Could not close the client socket");
+            }
+        }
+    }
 }
