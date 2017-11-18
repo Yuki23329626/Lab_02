@@ -9,4 +9,12 @@
     <string name="Visible">Get Visible</string>
     <string name="List">List Devices</string>
 
+    <string name="connecting">Connecting</string>
+    <string name="connected">Connected</string>
+    <string name="disconnected">Disconnected</string>
+    <string name="discovering">Discovering</string>
+    <string name="finished">Discovery finished</string>
+
+
+
 </resources>
