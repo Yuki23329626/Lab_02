@@ -3,21 +3,26 @@ package com.iot.practice.michael.practice02;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.lang.ref.WeakReference;
 import java.lang.reflect.Method;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.UUID;
 
 import android.Manifest;
+import android.app.Activity;
 import android.bluetooth.BluetoothSocket;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.IntentFilter;
+import android.os.Build;
 import android.os.Bundle;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
 import android.content.Intent;
 import android.os.Handler;
 import android.os.Message;
+import android.support.annotation.RequiresApi;
 import android.support.v4.app.ActivityCompat;
 import android.support.v7.app.AppCompatActivity;
 import android.util.Log;
@@ -74,12 +79,9 @@ public class MainActivity extends AppCompatActivity {
                     new String[]{Manifest.permission.ACCESS_COARSE_LOCATION},
                     MY_PERMISSIONS_REQUEST_ACCESS_COARSE_LOCATION);
             IntentFilter filter = new IntentFilter(BluetoothDevice.ACTION_FOUND);
-            registerReceiver(broadcastReceiver, filter);
-            filter = new IntentFilter(BluetoothAdapter.ACTION_DISCOVERY_STARTED);
-            registerReceiver(broadcastReceiver, filter);
-            filter = new IntentFilter(BluetoothAdapter.ACTION_DISCOVERY_FINISHED);
-            registerReceiver(broadcastReceiver, filter);
-            filter = new IntentFilter(BluetoothDevice.ACTION_BOND_STATE_CHANGED);
+            filter.addAction(BluetoothAdapter.ACTION_DISCOVERY_STARTED);
+            filter.addAction(BluetoothAdapter.ACTION_DISCOVERY_FINISHED);
+            filter.addAction(BluetoothDevice.ACTION_BOND_STATE_CHANGED);
             registerReceiver(broadcastReceiver, filter);
         }
     }
@@ -144,7 +146,8 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onDestroy() {
         unregisterReceiver(broadcastReceiver);
-
+        isConnected = false;
+        isConnecting = false;
         super.onDestroy();
     }
 
@@ -205,40 +208,214 @@ public class MainActivity extends AppCompatActivity {
     Button.OnClickListener onClickBtnDisconnect = new Button.OnClickListener() {
         @Override
         public void onClick(View view) {
-            bluetoothAdapter.disable();
+            if (connectedThread != null) {
+                connectedThread.cancel();
+                connectedThread = null;
+            }
+            if (connectThread != null) {
+                connectThread.cancel();
+                connectThread = null;
+            }
+            isConnected = false;
+            isConnecting = false;
             arrayListBluetoothDevice.clear();
             arrayListStrDevice.clear();
             listView.setAdapter(null);
             tvStatus.setText(R.string.disconnected);
-            Toast.makeText(getApplicationContext(),
-                    "Bluetooth has turned off", Toast.LENGTH_LONG).show();
+            Toast.makeText(getApplicationContext(),"Bluetooth has turned off", Toast.LENGTH_LONG).show();
+            bluetoothAdapter.disable();
         }
     };
 
     private BluetoothDevice getAvailableDevice() {
         String targetAddress = "2C:F7:F1";
-        for(BluetoothDevice currentDevice : arrayListBluetoothDevice) {
+        for (BluetoothDevice currentDevice : arrayListBluetoothDevice) {
             if (currentDevice.getAddress().startsWith(targetAddress) && currentDevice.getBondState() == BluetoothDevice.BOND_BONDED)
                 return currentDevice;
         }
         return null;
     }
 
+    public static final int MESSAGE_READ = 0;
+    public static final int MESSAGE_WRITE = 1;
+    public static final int MESSAGE_TOAST = 2;
+
+    static class MHandler extends Handler {
+        WeakReference<MainActivity> mainActivityWeakReference;
+
+        MHandler(MainActivity mainActivity) {
+            mainActivityWeakReference = new WeakReference<MainActivity>(mainActivity);
+        }
+
+        @RequiresApi(api = Build.VERSION_CODES.KITKAT)
+        @Override
+        public void handleMessage(Message message) {
+            MainActivity mainActivity = mainActivityWeakReference.get();
+            switch (message.what) {
+                case MESSAGE_READ:
+                    String str = new String((byte[])message.obj, StandardCharsets.UTF_8);
+                    try {
+                        mainActivity.tvStatus.setText("Hi, " + str);
+                    } catch (Exception e){
+                        mainActivity.tvStatus.setText("Hi, " + e);
+                    }
+                    break;
+                case MESSAGE_WRITE:
+                    break;
+                case MESSAGE_TOAST:
+                    break;
+                default:
+                    break;
+            } // end switch
+        }
+    }
+
+    MHandler mHandler = new MHandler(this);
+
+    private class ConnectedThread extends Thread {
+        private final BluetoothSocket mmSocket;
+        private final InputStream mmInStream;
+        private final OutputStream mmOutStream;
+        private byte[] mmBuffer; // mmBuffer store for the stream
+
+        ConnectedThread(BluetoothSocket socket) {
+            mmSocket = socket;
+            InputStream tmpIn = null;
+            OutputStream tmpOut = null;
+
+            // Get the input and output streams; using temp objects because
+            // member streams are final.
+            try {
+                tmpIn = socket.getInputStream();
+            } catch (final IOException e) {
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        tvStatus.setText("socket.getInputStream(): " + e);
+                    }
+                });
+            }
+
+            try {
+                tmpOut = socket.getOutputStream();
+            } catch (final IOException e) {
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        tvStatus.setText("socket.getOutputStream(): " + e);
+                    }
+                });
+            }
+
+            mmInStream = tmpIn;
+            mmOutStream = tmpOut;
+        }
+
+        public void run() {
+            mmBuffer = new byte[1024];
+            int numBytes; // bytes returned from read()
+
+            // Keep listening to the InputStream until an exception occurs
+            while (true) {
+                try {
+                    // Read from the InputStream
+                    numBytes = mmInStream.read(mmBuffer);
+                    // Send the obtain bytes to the UI activity
+                    Message readMsg = mHandler.obtainMessage(
+                            MESSAGE_READ, numBytes, -1, mmBuffer);
+                    readMsg.sendToTarget();
+                } catch (final IOException e) {
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            tvStatus.setText("Disconnected");
+                        }
+                    });
+                    break;
+                }
+            }
+        }
+
+        public void write(byte[] bytes) {
+            try {
+                mmOutStream.write(bytes);
+
+                // Share the sent message with the UI activity.
+                Message writtenMsg = mHandler.obtainMessage(
+                        MESSAGE_WRITE, -1, -1, mmBuffer);
+                writtenMsg.sendToTarget();
+            } catch (IOException e) {
+                Log.e(TAG, "Error occurred when sending data", e);
+
+                // Send a failure message back to the activity.
+                Message writeErrorMsg =
+                        mHandler.obtainMessage(MESSAGE_TOAST);
+                Bundle bundle = new Bundle();
+                bundle.putString("toast",
+                        "Couldn't send data to the other device");
+                writeErrorMsg.setData(bundle);
+                mHandler.sendMessage(writeErrorMsg);
+            }
+        }
+
+        public void cancel() {
+            try {
+                mmSocket.close();
+            } catch (IOException e) {
+                Log.e(TAG, "Could not close the client socket", e);
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        tvStatus.setText("Could not close the client socket");
+                    }
+                });
+            }
+        }
+    }
+
+    private synchronized void connected(BluetoothSocket bluetoothSocket, BluetoothDevice bluetoothDevice) {
+        if (connectedThread != null) {
+            connectedThread.cancel();
+            connectedThread = null;
+        }
+
+        if (connectThread != null) {
+            connectThread.cancel();
+            connectThread = null;
+        }
+
+        connectedThread = new ConnectedThread(bluetoothSocket);
+        connectedThread.start();
+
+        isConnected = true;
+        isConnecting = false;
+    }
+
     boolean isConnecting = false;
+    boolean isConnected = false;
+    private static ConnectedThread connectedThread = null;
+    private static ConnectThread connectThread = null;
     private Button.OnClickListener onClickBtnGetData = new Button.OnClickListener() {
         @Override
         public void onClick(View v) {
-            if(getAvailableDevice() == null){
+            if (getAvailableDevice() == null) {
                 tvStatus.setText("You don't have available paired device");
             } else {
-                if (!isConnecting) {
-                    tvStatus.setText("Getting data");
-                    Thread threadConnect = new ConnectThread(getAvailableDevice());
-                    threadConnect.start();
+                if (isConnecting) {
+                    tvStatus.setText("Connecting");
+                } else if (isConnected) {
+                    tvStatus.setText("Get data");
+                    // is connected
+                } else {
+                    tvStatus.setText("Start connecting");
+                    connectThread = new ConnectThread(getAvailableDevice());
+                    connectThread.start();
                 }
             }
         }
     };
+
+    final UUID MY_UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB");
 
     private class ConnectThread extends Thread {
         private final BluetoothSocket mmSocket;
@@ -253,7 +430,7 @@ public class MainActivity extends AppCompatActivity {
             try {
                 // Get a BluetoothSocket to connect with the given BluetoothDevice.
                 // MY_UUID is the app's UUID string, also used in the server code.
-                tmp = device.createRfcommSocketToServiceRecord(UUID.randomUUID());
+                tmp = device.createRfcommSocketToServiceRecord(MY_UUID);
             } catch (IOException e) {
                 Log.e(TAG, "Socket's create() method failed", e);
                 runOnUiThread(new Runnable() {
@@ -285,7 +462,7 @@ public class MainActivity extends AppCompatActivity {
                 runOnUiThread(new Runnable() {
                     @Override
                     public void run() {
-                        tvStatus.setText("Unable to connect: " + connectException.toString());
+                        tvStatus.setText("Unable to connect to [" + mmDevice.getName() + "]:[" + mmDevice.getAddress() + "]: " + connectException.toString());
                     }
                 });
                 try {
@@ -301,10 +478,19 @@ public class MainActivity extends AppCompatActivity {
                 }
                 return;
             }
+            synchronized (MainActivity.this) {
+                connectThread = null;
+            }
 
             // The connection attempt succeeded. Perform work associated with
             // the connection in a separate thread.
-            // Toast.makeText(getApplicationContext(), "The connection attempt succeeded", Toast.LENGTH_LONG).show();
+            runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    tvStatus.setText("Connected");
+                }
+            });
+            connected(mmSocket, mmDevice);
         }
 
         // Closes the client socket and causes the thread to finish.
@@ -313,7 +499,12 @@ public class MainActivity extends AppCompatActivity {
                 mmSocket.close();
             } catch (IOException e) {
                 Log.e(TAG, "Could not close the client socket", e);
-                tvStatus.setText("Could not close the client socket");
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        tvStatus.setText("Could not close the client socket");
+                    }
+                });
             }
         }
     }
